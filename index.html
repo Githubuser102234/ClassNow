@@ -124,7 +124,6 @@
          * @param {Array<Object>} classes The array of class data.
          */
         function displayClasses(classes) {
-            // Display classes in the main list
             classesListEl.innerHTML = '';
             if (classes.length === 0) {
                 classesListEl.innerHTML = '<p class="text-gray-500">No classes found. Create one or join an existing one!</p>';
@@ -143,6 +142,8 @@
                     document.getElementById('current-class-title').textContent = cls.title;
                     loggedOutSection.classList.add('hidden');
                     mainSection.classList.remove('hidden');
+                    // Hide the classes list in the main section when a class is selected
+                    document.getElementById('classes-section').classList.add('hidden');
                     switchTab('assignments');
                     setupClassListeners(cls.id, cls.creatorId === userId);
                 });
@@ -272,21 +273,32 @@
                     userId = user.uid;
                     userStatusEl.textContent = user.displayName;
                     userPhotoEl.src = user.photoURL;
+                    userPhotoEl.classList.remove('hidden');
+                    document.getElementById('sign-out-btn').classList.remove('hidden');
+
                     loggedOutSection.classList.add('hidden');
                     mainSection.classList.remove('hidden');
+                    
+                    // The fix: Show the classes tab immediately after login
+                    switchTab('classes');
                     setupClassesListener();
                 } else {
                     userId = null;
                     loggedOutSection.classList.remove('hidden');
                     mainSection.classList.add('hidden');
                     userStatusEl.textContent = 'Not signed in';
-                    userPhotoEl.src = '';
+                    userPhotoEl.classList.add('hidden');
+                    document.getElementById('sign-out-btn').classList.add('hidden');
                 }
             });
         };
 
         // Tab switching
-        document.getElementById('classes-btn').addEventListener('click', () => switchTab('classes'));
+        document.getElementById('classes-btn').addEventListener('click', () => {
+            switchTab('classes');
+            // Show the class list in the main section when this tab is active
+            document.getElementById('classes-section').classList.remove('hidden');
+        });
         document.getElementById('assignments-btn').addEventListener('click', () => switchTab('assignments'));
         document.getElementById('chat-btn').addEventListener('click', () => switchTab('chat'));
 
@@ -471,7 +483,7 @@
                 <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M22.022 12.022c0-.671-.059-1.32-.172-1.956H11.954v3.662h5.795c-.255 1.258-1.071 2.38-2.222 3.127v2.408h3.097c1.815-1.68 2.868-4.212 2.868-7.241z" />
                     <path d="M11.954 22.022c3.218 0 5.918-1.066 7.893-2.887l-3.097-2.408c-.858.6-1.96 1.002-3.32 1.002-2.56 0-4.73-1.72-5.507-4.048H3.344v2.484c1.696 3.35 5.253 5.578 8.61 5.578z" />
-                    <path d="M6.447 13.917c-.205-.6-.324-1.239-.324-1.917s.119-1.317.324-1.917V7.516H3.344c-.672 1.328-1.056 2.836-1.056 4.484s.384 3.156 1.056 4.484l3.103-2.485z" />
+                    <path d="M6.447 13.917c-.205-.6-.324-1.239-.324-1.917V7.516H3.344c-.672 1.328-1.056 2.836-1.056 4.484s.384 3.156 1.056 4.484l3.103-2.485z" />
                     <path d="M11.954 5.922c1.786 0 3.391.644 4.656 1.706l2.768-2.768C17.873 2.193 15.022.954 11.954.954c-3.357 0-6.914 2.228-8.61 5.578l3.103 2.484C7.224 7.642 9.494 5.922 11.954 5.922z" />
                 </svg>
                 <span>Sign in with Google</span>
