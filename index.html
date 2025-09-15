@@ -70,10 +70,10 @@
         const chatTabBtn = document.getElementById('chat-btn');
         const peopleTabBtn = document.getElementById('people-btn');
 
-
         // State variables
         let userId = null;
         let activeClassId = null;
+        let isUserBanned = false;
 
         /**
          * Displays a temporary message box with a given message.
@@ -225,13 +225,14 @@
             peopleListEl.innerHTML = '';
             members.forEach(member => {
                 const isTeacher = member.userId === creatorId;
+                const isBanned = member.isBanned;
                 const memberCard = document.createElement('div');
-                memberCard.className = 'flex items-center space-x-4 bg-white p-4 rounded-lg shadow-md';
+                memberCard.className = `flex items-center space-x-4 bg-white p-4 rounded-lg shadow-md ${isBanned ? 'bg-gray-200 opacity-50' : ''}`;
                 memberCard.innerHTML = `
                     <img src="${member.photoURL}" alt="${member.displayName}" class="w-10 h-10 rounded-full">
                     <div>
                         <p class="font-semibold text-gray-800">${member.displayName}</p>
-                        <p class="text-sm text-gray-500">${isTeacher ? 'Teacher' : 'Student'}</p>
+                        <p class="text-sm text-gray-500">${isTeacher ? 'Teacher' : 'Student'}${isBanned ? ' (Banned)' : ''}</p>
                     </div>
                 `;
                 peopleListEl.appendChild(memberCard);
@@ -243,9 +244,20 @@
          * @param {string} classId The ID of the class to listen to.
          * @param {boolean} isOwner True if the current user is the class owner.
          */
-        function setupClassListeners(classId, isOwner) {
+        async function setupClassListeners(classId, isOwner) {
+            // Check if the class owner is banned
+            let isOwnerBanned = false;
+            if (!isOwner) {
+                const classDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId));
+                if (classDoc.exists()) {
+                    const ownerId = classDoc.data().creatorId;
+                    const ownerDoc = await getDoc(doc(db, 'artifacts', appId, 'users', ownerId));
+                    isOwnerBanned = ownerDoc.exists() ? ownerDoc.data().isBanned : false;
+                }
+            }
+
             // Show/hide owner-specific features
-            if (isOwner) {
+            if (isOwner && !isUserBanned) {
                 createAssignmentForm.classList.remove('hidden');
                 settingsTabBtn.classList.remove('hidden');
             } else {
@@ -253,30 +265,41 @@
                 settingsTabBtn.classList.add('hidden');
             }
 
-            // Listen to assignments
-            const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments');
-            onSnapshot(assignmentsRef, (snapshot) => {
-                const assignments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                displayAssignments(assignments, isOwner);
-            }, (error) => {
-                console.error("Error listening to assignments:", error);
-                showMessage("Error loading assignments.", true);
-            });
+            if (isOwnerBanned) {
+                // If the owner is banned, show service unavailable message
+                assignmentsListEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
+                chatMessagesEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
+            } else {
+                // Listen to assignments
+                const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments');
+                onSnapshot(assignmentsRef, (snapshot) => {
+                    const assignments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    displayAssignments(assignments, isOwner);
+                }, (error) => {
+                    console.error("Error listening to assignments:", error);
+                    showMessage("Error loading assignments.", true);
+                });
 
-            // Listen to chat messages
-            const chatRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'chat');
-            onSnapshot(chatRef, (snapshot) => {
-                const messages = snapshot.docs.map(doc => doc.data()).sort((a, b) => a.timestamp - b.timestamp);
-                displayChat(messages);
-            }, (error) => {
-                console.error("Error listening to chat:", error);
-                showMessage("Error loading chat.", true);
-            });
+                // Listen to chat messages
+                const chatRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'chat');
+                onSnapshot(chatRef, (snapshot) => {
+                    const messages = snapshot.docs.map(doc => doc.data()).sort((a, b) => a.timestamp - b.timestamp);
+                    displayChat(messages);
+                }, (error) => {
+                    console.error("Error listening to chat:", error);
+                    showMessage("Error loading chat.", true);
+                });
+            }
 
-            // Listen to class members
+            // Listen to class members and check their banned status
             const membersRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'members');
-            onSnapshot(membersRef, (snapshot) => {
-                const members = snapshot.docs.map(doc => doc.data());
+            onSnapshot(membersRef, async (snapshot) => {
+                const members = await Promise.all(snapshot.docs.map(async (memberDoc) => {
+                    const memberData = memberDoc.data();
+                    const userRef = doc(db, 'artifacts', appId, 'users', memberData.userId);
+                    const userDoc = await getDoc(userRef);
+                    return { ...memberData, isBanned: userDoc.exists() ? userDoc.data().isBanned || false : false };
+                }));
                 displayPeople(members, isOwner ? userId : null);
             }, (error) => {
                 console.error("Error listening to members:", error);
@@ -317,6 +340,30 @@
 
                 if (user) {
                     userId = user.uid;
+
+                    // Fetch user's profile to check for banned status
+                    const userDocRef = doc(db, 'artifacts', appId, 'users', userId);
+                    const userDoc = await getDoc(userDocRef);
+                    if (userDoc.exists()) {
+                        isUserBanned = userDoc.data().isBanned || false;
+                    } else {
+                        // Create a new user profile if it doesn't exist
+                        await setDoc(userDocRef, {
+                            displayName: user.displayName,
+                            photoURL: user.photoURL,
+                            isBanned: false,
+                            createdAt: Date.now()
+                        });
+                        isUserBanned = false;
+                    }
+
+                    if (isUserBanned) {
+                        // User is banned, log them out immediately
+                        await signOut(auth);
+                        showMessage('You have been banned. Please contact the administrator.', true);
+                        return;
+                    }
+
                     userStatusEl.textContent = user.displayName;
                     userPhotoEl.src = user.photoURL;
                     userPhotoEl.classList.remove('hidden');
@@ -401,6 +448,7 @@
                     
                 } else {
                     userId = null;
+                    isUserBanned = false; // Reset banned status on sign out
                     document.getElementById('login-forms').classList.remove('hidden');
                     document.getElementById('user-dashboard').classList.add('hidden');
                     userStatusEl.textContent = 'Not signed in';
