@@ -51,7 +51,7 @@
         // UI elements
         const loadingScreen = document.getElementById('loading-screen');
         const mainContent = document.getElementById('main-content');
-        const loggedOutSection = document.getElementById('logged-out-section');
+        const dashboardSection = document.getElementById('dashboard-section');
         const mainSection = document.getElementById('main-section');
         const userStatusEl = document.getElementById('user-status');
         const userPhotoEl = document.getElementById('user-photo');
@@ -140,10 +140,8 @@
                 classCard.addEventListener('click', () => {
                     activeClassId = cls.id;
                     document.getElementById('current-class-title').textContent = cls.title;
-                    loggedOutSection.classList.add('hidden');
+                    dashboardSection.classList.add('hidden');
                     mainSection.classList.remove('hidden');
-                    // Hide the classes list in the main section when a class is selected
-                    document.getElementById('classes-section').classList.add('hidden');
                     switchTab('assignments');
                     setupClassListeners(cls.id, cls.creatorId === userId);
                 });
@@ -262,6 +260,16 @@
             });
         }
 
+        /**
+         * Shows the main dashboard view.
+         */
+        function showDashboard() {
+            dashboardSection.classList.remove('hidden');
+            mainSection.classList.add('hidden');
+            // This ensures the class list is populated on return
+            setupClassesListener();
+        }
+
         // --- Event Listeners and Initial Setup ---
 
         window.onload = function() {
@@ -276,16 +284,16 @@
                     userPhotoEl.classList.remove('hidden');
                     document.getElementById('sign-out-btn').classList.remove('hidden');
 
-                    loggedOutSection.classList.add('hidden');
-                    mainSection.classList.remove('hidden');
-                    
-                    // The fix: Show the classes tab immediately after login
-                    switchTab('classes');
-                    setupClassesListener();
+                    document.getElementById('login-forms').classList.add('hidden');
+                    document.getElementById('user-dashboard').classList.remove('hidden');
+
+                    // Show the main dashboard view with the class list and forms
+                    showDashboard();
+
                 } else {
                     userId = null;
-                    loggedOutSection.classList.remove('hidden');
-                    mainSection.classList.add('hidden');
+                    document.getElementById('login-forms').classList.remove('hidden');
+                    document.getElementById('user-dashboard').classList.add('hidden');
                     userStatusEl.textContent = 'Not signed in';
                     userPhotoEl.classList.add('hidden');
                     document.getElementById('sign-out-btn').classList.add('hidden');
@@ -296,8 +304,6 @@
         // Tab switching
         document.getElementById('classes-btn').addEventListener('click', () => {
             switchTab('classes');
-            // Show the class list in the main section when this tab is active
-            document.getElementById('classes-section').classList.remove('hidden');
         });
         document.getElementById('assignments-btn').addEventListener('click', () => switchTab('assignments'));
         document.getElementById('chat-btn').addEventListener('click', () => switchTab('chat'));
@@ -305,6 +311,9 @@
         // Sign in and out buttons
         document.getElementById('google-sign-in-btn').addEventListener('click', signInWithGoogle);
         document.getElementById('sign-out-btn').addEventListener('click', handleSignOut);
+
+        // "Back to Classes" button
+        document.getElementById('back-to-classes-btn').addEventListener('click', showDashboard);
 
         // Form for creating a new class
         document.getElementById('create-class-form').addEventListener('submit', async (e) => {
@@ -341,7 +350,7 @@
                 if (classDoc.exists()) {
                     activeClassId = classIdToJoin;
                     document.getElementById('current-class-title').textContent = classDoc.data().title;
-                    loggedOutSection.classList.add('hidden');
+                    dashboardSection.classList.add('hidden');
                     mainSection.classList.remove('hidden');
                     switchTab('assignments');
                     setupClassListeners(classIdToJoin, classDoc.data().creatorId === userId);
@@ -443,7 +452,7 @@
 
                 await batch.commit();
                 showMessage('Class and all its data have been deleted.');
-                location.reload(); // Reload the page to go back to the class list
+                showDashboard();
             } catch (error) {
                 console.error("Error deleting class:", error);
                 showMessage("Failed to delete class.", true);
@@ -475,30 +484,58 @@
         <!-- Message Box for notifications -->
         <div id="message-box" class="p-3 my-4 text-sm rounded-lg transition-all duration-300 transform scale-0 h-0"></div>
 
-        <!-- Logged Out Section -->
-        <div id="logged-out-section" class="flex flex-col items-center text-center space-y-6">
-            <h2 class="text-2xl font-semibold text-gray-800">Welcome to ClassNow</h2>
-            <p class="text-gray-600">Please sign in to join or create classes.</p>
-            <button id="google-sign-in-btn" class="flex items-center space-x-2 px-6 py-3 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition-colors">
-                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M22.022 12.022c0-.671-.059-1.32-.172-1.956H11.954v3.662h5.795c-.255 1.258-1.071 2.38-2.222 3.127v2.408h3.097c1.815-1.68 2.868-4.212 2.868-7.241z" />
-                    <path d="M11.954 22.022c3.218 0 5.918-1.066 7.893-2.887l-3.097-2.408c-.858.6-1.96 1.002-3.32 1.002-2.56 0-4.73-1.72-5.507-4.048H3.344v2.484c1.696 3.35 5.253 5.578 8.61 5.578z" />
-                    <path d="M6.447 13.917c-.205-.6-.324-1.239-.324-1.917V7.516H3.344c-.672 1.328-1.056 2.836-1.056 4.484s.384 3.156 1.056 4.484l3.103-2.485z" />
-                    <path d="M11.954 5.922c1.786 0 3.391.644 4.656 1.706l2.768-2.768C17.873 2.193 15.022.954 11.954.954c-3.357 0-6.914 2.228-8.61 5.578l3.103 2.484C7.224 7.642 9.494 5.922 11.954 5.922z" />
-                </svg>
-                <span>Sign in with Google</span>
-            </button>
+        <!-- Dashboard Section (Shows Create/Join forms and class list) -->
+        <div id="dashboard-section">
+            <div id="login-forms" class="space-y-6">
+                <h2 class="text-2xl font-semibold text-gray-800 text-center">Welcome to ClassNow</h2>
+                <p class="text-gray-600 text-center">Please sign in to join or create classes.</p>
+                <div class="flex flex-col items-center">
+                    <button id="google-sign-in-btn" class="flex items-center space-x-2 px-6 py-3 bg-blue-500 text-white font-semibold rounded-lg shadow-md hover:bg-blue-600 transition-colors">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M22.022 12.022c0-.671-.059-1.32-.172-1.956H11.954v3.662h5.795c-.255 1.258-1.071 2.38-2.222 3.127v2.408h3.097c1.815-1.68 2.868-4.212 2.868-7.241z" />
+                            <path d="M11.954 22.022c3.218 0 5.918-1.066 7.893-2.887l-3.097-2.408c-.858.6-1.96 1.002-3.32 1.002-2.56 0-4.73-1.72-5.507-4.048H3.344v2.484c1.696 3.35 5.253 5.578 8.61 5.578z" />
+                            <path d="M6.447 13.917c-.205-.6-.324-1.239-.324-1.917V7.516H3.344c-.672 1.328-1.056 2.836-1.056 4.484s.384 3.156 1.056 4.484l3.103-2.485z" />
+                            <path d="M11.954 5.922c1.786 0 3.391.644 4.656 1.706l2.768-2.768C17.873 2.193 15.022.954 11.954.954c-3.357 0-6.914 2.228-8.61 5.578l3.103 2.484C7.224 7.642 9.494 5.922 11.954 5.922z" />
+                        </svg>
+                        <span>Sign in with Google</span>
+                    </button>
+                </div>
+            </div>
+
+            <div id="user-dashboard" class="space-y-6 hidden">
+                <h2 class="text-2xl font-semibold text-center">Join or Create a Class</h2>
+                <div class="flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-6">
+                    <!-- Create Class Form -->
+                    <div class="bg-gray-50 p-6 rounded-lg shadow-inner flex-1">
+                        <h3 class="text-xl font-medium mb-3">Create New Class</h3>
+                        <form id="create-class-form" class="space-y-4">
+                            <input type="text" id="class-title-input" placeholder="Class Title" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg font-semibold hover:bg-blue-600 transition-colors">Create</button>
+                        </form>
+                    </div>
+                    <!-- Join Class Form -->
+                    <div class="bg-gray-50 p-6 rounded-lg shadow-inner flex-1">
+                        <h3 class="text-xl font-medium mb-3">Join Existing Class</h3>
+                        <form id="join-class-form" class="space-y-4">
+                            <input type="text" id="class-id-input" placeholder="Class ID" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg font-semibold hover:bg-blue-600 transition-colors">Join</button>
+                        </form>
+                    </div>
+                </div>
+                <div id="classes-list" class="mt-8 space-y-4">
+                    <!-- Classes will be dynamically populated here -->
+                </div>
+            </div>
         </div>
 
-        <!-- Main App Section -->
+        <!-- Main App Section (hidden until a class is selected) -->
         <div id="main-section" class="hidden">
             <div class="flex items-center justify-between">
                 <h2 class="text-2xl font-semibold text-gray-800" id="current-class-title"></h2>
-                <button class="text-sm text-blue-500 hover:text-blue-700 font-semibold" onclick="location.reload()">Back to Classes</button>
+                <button id="back-to-classes-btn" class="text-sm text-blue-500 hover:text-blue-700 font-semibold">Back to Classes</button>
             </div>
             <!-- Tab Navigation -->
             <div class="flex justify-around my-6 bg-gray-100 rounded-lg p-1">
-                <button id="classes-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Classes</button>
                 <button id="assignments-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Assignments</button>
                 <button id="chat-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Chat</button>
             </div>
@@ -532,15 +569,6 @@
                     <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors">Send</button>
                 </form>
             </div>
-
-            <!-- Classes Tab Content -->
-            <div id="classes-section" class="tab-content hidden">
-                <h3 class="text-xl font-semibold text-gray-700 mb-4">Your Classes</h3>
-                <div id="classes-list-main" class="mt-8 space-y-4">
-                    <!-- Classes will be dynamically populated here. Same list as login section. -->
-                </div>
-            </div>
-
         </div>
 
         <!-- Delete Class Confirmation Modal -->
