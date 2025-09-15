@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClassNow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+    </style>
+    <script type="module">
+        // Hardcoded SDK as requested.
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+        import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-analytics.js";
+        // TODO: Add SDKs for Firebase products that you want to use
+        // https://firebase.google.com/docs/web/setup#available-libraries
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, getDoc, setDoc, addDoc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+        // Your web app's Firebase configuration
+        // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+        const firebaseConfig = {
+            apiKey: "AIzaSyDXuqG3e-LZuSpSG-WRPtuZbDVLyqswBFo",
+            authDomain: "classnow-a5164.firebaseapp.com",
+            projectId: "classnow-a5164",
+            storageBucket: "classnow-a5164.firebasestorage.app",
+            messagingSenderId: "490753047342",
+            appId: "1:490753047342:web:09afd4c93397fd9e1f98bf",
+            measurementId: "G-BCCEZ17PJM"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const analytics = getAnalytics(app);
+        setLogLevel('debug'); // For logging firebase activity
+
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // UI elements
+        const loadingScreen = document.getElementById('loading-screen');
+        const mainContent = document.getElementById('main-content');
+        const loginSection = document.getElementById('login-section');
+        const mainSection = document.getElementById('main-section');
+        const userStatusEl = document.getElementById('user-status');
+        const messageBox = document.getElementById('message-box');
+        const classesListEl = document.getElementById('classes-list');
+        const assignmentsListEl = document.getElementById('assignments-list');
+        const chatMessagesEl = document.getElementById('chat-messages');
+
+        // State variables
+        let userId = null;
+        let activeClassId = null;
+
+        /**
+         * Displays a temporary message box with a given message.
+         * @param {string} message The message to display.
+         * @param {boolean} isError True if the message is an error.
+         */
+        function showMessage(message, isError = false) {
+            messageBox.textContent = message;
+            messageBox.className = `p-3 my-4 text-sm rounded-lg ${isError ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'} transition-all duration-300 transform scale-100`;
+            setTimeout(() => {
+                messageBox.textContent = '';
+                messageBox.className = 'transition-all duration-300 transform scale-0 h-0';
+            }, 3000);
+        }
+
+        /**
+         * Authenticates the user with Firebase.
+         */
+        async function authenticateUser() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Firebase Auth Error:", error);
+                showMessage(`Authentication failed: ${error.message}`, true);
+            }
+        }
+
+        /**
+         * Switches the active tab/section.
+         * @param {string} tabName The name of the tab to switch to ('classes', 'assignments', 'chat').
+         */
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`${tabName}-section`).classList.remove('hidden');
+
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('bg-gray-200'));
+            document.getElementById(`${tabName}-btn`).classList.add('bg-gray-200');
+        }
+
+        /**
+         * Displays the classes list.
+         * @param {Array<Object>} classes The array of class data.
+         */
+        function displayClasses(classes) {
+            classesListEl.innerHTML = '';
+            if (classes.length === 0) {
+                classesListEl.innerHTML = '<p class="text-gray-500">No classes found. Create one or join an existing one!</p>';
+                return;
+            }
+            classes.forEach(cls => {
+                const classCard = document.createElement('div');
+                classCard.className = 'bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer';
+                classCard.innerHTML = `
+                    <h3 class="text-xl font-semibold text-gray-800">${cls.title}</h3>
+                    <p class="text-sm text-gray-500">ID: <span class="font-mono text-gray-700">${cls.id}</span></p>
+                    <p class="mt-2 text-gray-600">Creator: ${cls.creatorName}</p>
+                `;
+                classCard.addEventListener('click', () => {
+                    activeClassId = cls.id;
+                    document.getElementById('current-class-title').textContent = cls.title;
+                    mainSection.classList.remove('hidden');
+                    switchTab('assignments');
+                    setupClassListeners(cls.id);
+                });
+                classesListEl.appendChild(classCard);
+            });
+        }
+
+        /**
+         * Displays the assignments for the active class.
+         * @param {Array<Object>} assignments The array of assignment data.
+         */
+        function displayAssignments(assignments) {
+            assignmentsListEl.innerHTML = '';
+            if (assignments.length === 0) {
+                assignmentsListEl.innerHTML = '<p class="text-gray-500">No assignments posted yet.</p>';
+                return;
+            }
+            assignments.forEach(assignment => {
+                const assignmentCard = document.createElement('div');
+                assignmentCard.className = 'bg-white p-6 rounded-lg shadow-md mb-4';
+                assignmentCard.innerHTML = `
+                    <h3 class="text-lg font-semibold text-gray-800">${assignment.title}</h3>
+                    <p class="text-gray-600 my-2">${assignment.description}</p>
+                    <p class="text-sm text-gray-500">Due: ${new Date(assignment.dueDate).toLocaleDateString()}</p>
+                    <button class="submit-btn mt-4 px-4 py-2 bg-blue-500 text-white text-sm rounded-lg shadow-md hover:bg-blue-600 transition-colors">Mark as Done</button>
+                `;
+                assignmentCard.querySelector('.submit-btn').addEventListener('click', () => {
+                    showMessage('Assignment marked as done!');
+                });
+                assignmentsListEl.appendChild(assignmentCard);
+            });
+        }
+
+        /**
+         * Displays chat messages for the active class.
+         * @param {Array<Object>} messages The array of chat message data.
+         */
+        function displayChat(messages) {
+            chatMessagesEl.innerHTML = '';
+            messages.forEach(msg => {
+                const isUser = msg.senderId === userId;
+                const messageEl = document.createElement('div');
+                messageEl.className = `p-3 rounded-lg shadow-sm max-w-xs mb-2 break-words ${isUser ? 'bg-blue-500 text-white self-end' : 'bg-gray-200 text-gray-800 self-start'}`;
+                messageEl.textContent = `${msg.senderName}: ${msg.message}`;
+                chatMessagesEl.appendChild(messageEl);
+            });
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight; // Auto-scroll to bottom
+        }
+
+        /**
+         * Sets up real-time listeners for the active class's assignments and chat.
+         * @param {string} classId The ID of the class to listen to.
+         */
+        function setupClassListeners(classId) {
+            const classRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId);
+
+            // Listen to assignments
+            const assignmentsRef = collection(classRef, 'assignments');
+            onSnapshot(assignmentsRef, (snapshot) => {
+                const assignments = snapshot.docs.map(doc => doc.data());
+                displayAssignments(assignments);
+            }, (error) => {
+                console.error("Error listening to assignments:", error);
+                showMessage("Error loading assignments.", true);
+            });
+
+            // Listen to chat messages
+            const chatRef = collection(classRef, 'chat');
+            onSnapshot(chatRef, (snapshot) => {
+                const messages = snapshot.docs.map(doc => doc.data());
+                displayChat(messages);
+            }, (error) => {
+                console.error("Error listening to chat:", error);
+                showMessage("Error loading chat.", true);
+            });
+        }
+
+        /**
+         * Set up a listener for the classes collection.
+         */
+        function setupClassesListener() {
+            const classesRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes');
+            onSnapshot(classesRef, (snapshot) => {
+                const classes = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                displayClasses(classes);
+            }, (error) => {
+                console.error("Error listening to classes:", error);
+                showMessage("Error loading classes.", true);
+            });
+        }
+
+        // --- Event Listeners and Initial Setup ---
+
+        window.onload = function() {
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    userStatusEl.textContent = `Authenticated as: ${userId}`;
+                    loginSection.classList.add('hidden');
+                    mainSection.classList.remove('hidden');
+                    loadingScreen.classList.add('hidden');
+                    setupClassesListener();
+                } else {
+                    await authenticateUser();
+                }
+            });
+        };
+
+        // Tab switching
+        document.getElementById('classes-btn').addEventListener('click', () => switchTab('classes'));
+        document.getElementById('assignments-btn').addEventListener('click', () => switchTab('assignments'));
+        document.getElementById('chat-btn').addEventListener('click', () => switchTab('chat'));
+
+        // Form for creating a new class
+        document.getElementById('create-class-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const classTitle = document.getElementById('class-title-input').value;
+            if (!classTitle) return;
+
+            const classesRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes');
+            try {
+                const newClassRef = doc(classesRef);
+                await setDoc(newClassRef, {
+                    title: classTitle,
+                    creatorId: userId,
+                    creatorName: 'User-' + userId.substring(0, 4), // Simple name for demo
+                    createdAt: Date.now()
+                });
+                showMessage('Class created successfully!');
+                document.getElementById('class-title-input').value = '';
+            } catch (error) {
+                console.error("Error creating class:", error);
+                showMessage("Failed to create class.", true);
+            }
+        });
+
+        // Form for joining a class
+        document.getElementById('join-class-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const classIdToJoin = document.getElementById('class-id-input').value;
+            if (!classIdToJoin) return;
+
+            const classRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', classIdToJoin);
+            try {
+                const classDoc = await getDoc(classRef);
+                if (classDoc.exists()) {
+                    activeClassId = classIdToJoin;
+                    document.getElementById('current-class-title').textContent = classDoc.data().title;
+                    mainSection.classList.remove('hidden');
+                    switchTab('assignments');
+                    setupClassListeners(classIdToJoin);
+                    showMessage('Successfully joined class!');
+                    document.getElementById('class-id-input').value = '';
+                } else {
+                    showMessage('Class not found.', true);
+                }
+            } catch (error) {
+                console.error("Error joining class:", error);
+                showMessage("Failed to join class.", true);
+            }
+        });
+
+        // Form for creating a new assignment
+        document.getElementById('create-assignment-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!activeClassId) return showMessage('Please select a class first.', true);
+
+            const assignmentTitle = document.getElementById('assignment-title-input').value;
+            const assignmentDesc = document.getElementById('assignment-desc-input').value;
+            const assignmentDueDate = document.getElementById('assignment-due-date-input').value;
+
+            if (!assignmentTitle || !assignmentDesc || !assignmentDueDate) {
+                return showMessage('All assignment fields are required.', true);
+            }
+
+            const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments');
+            try {
+                await addDoc(assignmentsRef, {
+                    title: assignmentTitle,
+                    description: assignmentDesc,
+                    dueDate: new Date(assignmentDueDate).getTime(),
+                    creatorId: userId,
+                    createdAt: Date.now()
+                });
+                showMessage('Assignment posted successfully!');
+                e.target.reset();
+            } catch (error) {
+                console.error("Error posting assignment:", error);
+                showMessage("Failed to post assignment.", true);
+            }
+        });
+
+        // Form for sending a chat message
+        document.getElementById('chat-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const messageInput = document.getElementById('message-input');
+            const messageText = messageInput.value.trim();
+
+            if (!messageText || !activeClassId) return;
+
+            const chatRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'chat');
+            try {
+                await addDoc(chatRef, {
+                    senderId: userId,
+                    senderName: 'User-' + userId.substring(0, 4),
+                    message: messageText,
+                    timestamp: Date.now()
+                });
+                messageInput.value = '';
+            } catch (error) {
+                console.error("Error sending message:", error);
+                showMessage("Failed to send message.", true);
+            }
+        });
+
+    </script>
+</head>
+
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="fixed inset-0 bg-gray-100 flex flex-col items-center justify-center">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-blue-500"></div>
+        <p class="mt-4 text-gray-600">Loading...</p>
+    </div>
+
+    <!-- Main Container -->
+    <div id="main-content" class="w-full max-w-4xl bg-white rounded-xl shadow-2xl overflow-hidden p-6 mx-4 sm:mx-8 md:mx-auto hidden">
+
+        <!-- Header -->
+        <header class="pb-4 border-b border-gray-200 mb-4">
+            <h1 class="text-3xl font-bold text-gray-900 text-center">ClassNow</h1>
+            <p id="user-status" class="text-sm text-gray-500 mt-1 text-center font-mono"></p>
+        </header>
+
+        <!-- Message Box for notifications -->
+        <div id="message-box" class="p-3 my-4 text-sm rounded-lg transition-all duration-300 transform scale-0 h-0"></div>
+
+        <!-- Login Section (hidden after auth) -->
+        <div id="login-section" class="space-y-6">
+            <h2 class="text-2xl font-semibold text-center">Join or Create a Class</h2>
+            <div class="flex flex-col space-y-4 sm:flex-row sm:space-y-0 sm:space-x-6">
+                <!-- Create Class Form -->
+                <div class="bg-gray-50 p-6 rounded-lg shadow-inner flex-1">
+                    <h3 class="text-xl font-medium mb-3">Create New Class</h3>
+                    <form id="create-class-form" class="space-y-4">
+                        <input type="text" id="class-title-input" placeholder="Class Title" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg font-semibold hover:bg-blue-600 transition-colors">Create</button>
+                    </form>
+                </div>
+                <!-- Join Class Form -->
+                <div class="bg-gray-50 p-6 rounded-lg shadow-inner flex-1">
+                    <h3 class="text-xl font-medium mb-3">Join Existing Class</h3>
+                    <form id="join-class-form" class="space-y-4">
+                        <input type="text" id="class-id-input" placeholder="Class ID" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg font-semibold hover:bg-blue-600 transition-colors">Join</button>
+                    </form>
+                </div>
+            </div>
+            <div id="classes-list" class="mt-8 space-y-4">
+                <!-- Classes will be dynamically populated here -->
+            </div>
+        </div>
+
+        <!-- Main App Section (hidden until a class is selected) -->
+        <div id="main-section" class="hidden">
+            <div class="flex items-center justify-between">
+                <h2 class="text-2xl font-semibold text-gray-800" id="current-class-title"></h2>
+                <button class="text-sm text-blue-500 hover:text-blue-700 font-semibold" onclick="location.reload()">Back to Classes</button>
+            </div>
+            <!-- Tab Navigation -->
+            <div class="flex justify-around my-6 bg-gray-100 rounded-lg p-1">
+                <button id="classes-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200 bg-gray-200">Classes</button>
+                <button id="assignments-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Assignments</button>
+                <button id="chat-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Chat</button>
+            </div>
+
+            <!-- Assignments Tab Content -->
+            <div id="assignments-section" class="tab-content space-y-6">
+                <h3 class="text-xl font-semibold text-gray-700">Assignments</h3>
+                <div id="assignments-list" class="space-y-4">
+                    <!-- Assignments will be populated here -->
+                </div>
+                <div class="bg-gray-50 p-6 rounded-lg shadow-inner">
+                    <h3 class="text-lg font-medium mb-3">Create New Assignment</h3>
+                    <form id="create-assignment-form" class="space-y-4">
+                        <input type="text" id="assignment-title-input" placeholder="Assignment Title" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <textarea id="assignment-desc-input" placeholder="Description" rows="3" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                        <input type="date" id="assignment-due-date-input" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button type="submit" class="w-full bg-blue-500 text-white py-2 rounded-lg font-semibold hover:bg-blue-600 transition-colors">Post Assignment</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Chat Tab Content -->
+            <div id="chat-section" class="tab-content hidden flex flex-col h-[70vh] max-h-[70vh]">
+                <h3 class="text-xl font-semibold text-gray-700 mb-4">Class Chat</h3>
+                <div id="chat-messages" class="flex-1 overflow-y-auto p-4 bg-gray-50 rounded-lg shadow-inner flex flex-col space-y-2">
+                    <!-- Messages will be populated here -->
+                </div>
+                <form id="chat-form" class="mt-4 flex space-x-2">
+                    <input type="text" id="message-input" placeholder="Type a message..." class="flex-1 px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="submit" class="px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-colors">Send</button>
+                </form>
+            </div>
+
+            <!-- Initially show the classes list -->
+            <div id="classes-section" class="tab-content">
+                <h3 class="text-xl font-semibold text-gray-700 mb-4">Your Classes</h3>
+                <div id="classes-list-main" class="mt-8 space-y-4">
+                    <!-- Classes will be dynamically populated here. Same list as login section. -->
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+</body>
+
+</html>
+
