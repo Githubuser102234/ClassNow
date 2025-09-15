@@ -287,9 +287,64 @@
                     document.getElementById('login-forms').classList.add('hidden');
                     document.getElementById('user-dashboard').classList.remove('hidden');
 
-                    // Show the main dashboard view with the class list and forms
                     showDashboard();
+                    
+                    // Attach event listeners for the dashboard forms and back button here
+                    // to ensure the elements are available in the DOM.
+                    
+                    // Form for creating a new class
+                    document.getElementById('create-class-form').addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const classTitle = document.getElementById('class-title-input').value;
+                        if (!classTitle) return;
 
+                        const classesRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes');
+                        try {
+                            const newClassRef = doc(classesRef);
+                            await setDoc(newClassRef, {
+                                title: classTitle,
+                                creatorId: userId,
+                                creatorName: auth.currentUser.displayName,
+                                createdAt: Date.now()
+                            });
+                            showMessage('Class created successfully!');
+                            document.getElementById('class-title-input').value = '';
+                        } catch (error) {
+                            console.error("Error creating class:", error);
+                            showMessage("Failed to create class.", true);
+                        }
+                    });
+
+                    // Form for joining a class
+                    document.getElementById('join-class-form').addEventListener('submit', async (e) => {
+                        e.preventDefault();
+                        const classIdToJoin = document.getElementById('class-id-input').value;
+                        if (!classIdToJoin) return;
+
+                        const classRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', classIdToJoin);
+                        try {
+                            const classDoc = await getDoc(classRef);
+                            if (classDoc.exists()) {
+                                activeClassId = classIdToJoin;
+                                document.getElementById('current-class-title').textContent = classDoc.data().title;
+                                dashboardSection.classList.add('hidden');
+                                mainSection.classList.remove('hidden');
+                                switchTab('assignments');
+                                setupClassListeners(classIdToJoin, classDoc.data().creatorId === userId);
+                                showMessage('Successfully joined class!');
+                                document.getElementById('class-id-input').value = '';
+                            } else {
+                                showMessage('Class not found.', true);
+                            }
+                        } catch (error) {
+                            console.error("Error joining class:", error);
+                            showMessage("Failed to join class.", true);
+                        }
+                    });
+
+                    // "Back to Classes" button
+                    document.getElementById('back-to-classes-btn').addEventListener('click', showDashboard);
+                    
                 } else {
                     userId = null;
                     document.getElementById('login-forms').classList.remove('hidden');
@@ -302,68 +357,12 @@
         };
 
         // Tab switching
-        document.getElementById('classes-btn').addEventListener('click', () => {
-            switchTab('classes');
-        });
         document.getElementById('assignments-btn').addEventListener('click', () => switchTab('assignments'));
         document.getElementById('chat-btn').addEventListener('click', () => switchTab('chat'));
 
         // Sign in and out buttons
         document.getElementById('google-sign-in-btn').addEventListener('click', signInWithGoogle);
         document.getElementById('sign-out-btn').addEventListener('click', handleSignOut);
-
-        // "Back to Classes" button
-        document.getElementById('back-to-classes-btn').addEventListener('click', showDashboard);
-
-        // Form for creating a new class
-        document.getElementById('create-class-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const classTitle = document.getElementById('class-title-input').value;
-            if (!classTitle) return;
-
-            const classesRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes');
-            try {
-                const newClassRef = doc(classesRef);
-                await setDoc(newClassRef, {
-                    title: classTitle,
-                    creatorId: userId,
-                    creatorName: auth.currentUser.displayName,
-                    createdAt: Date.now()
-                });
-                showMessage('Class created successfully!');
-                document.getElementById('class-title-input').value = '';
-            } catch (error) {
-                console.error("Error creating class:", error);
-                showMessage("Failed to create class.", true);
-            }
-        });
-
-        // Form for joining a class
-        document.getElementById('join-class-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const classIdToJoin = document.getElementById('class-id-input').value;
-            if (!classIdToJoin) return;
-
-            const classRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', classIdToJoin);
-            try {
-                const classDoc = await getDoc(classRef);
-                if (classDoc.exists()) {
-                    activeClassId = classIdToJoin;
-                    document.getElementById('current-class-title').textContent = classDoc.data().title;
-                    dashboardSection.classList.add('hidden');
-                    mainSection.classList.remove('hidden');
-                    switchTab('assignments');
-                    setupClassListeners(classIdToJoin, classDoc.data().creatorId === userId);
-                    showMessage('Successfully joined class!');
-                    document.getElementById('class-id-input').value = '';
-                } else {
-                    showMessage('Class not found.', true);
-                }
-            } catch (error) {
-                console.error("Error joining class:", error);
-                showMessage("Failed to join class.", true);
-            }
-        });
 
         // Form for creating a new assignment
         document.getElementById('create-assignment-form').addEventListener('submit', async (e) => {
