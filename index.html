@@ -110,27 +110,31 @@
          * @param {Array<Object>} classes The array of class data.
          */
         function displayClasses(classes) {
-            classesListEl.innerHTML = '';
-            if (classes.length === 0) {
-                classesListEl.innerHTML = '<p class="text-gray-500">No classes found. Create one or join an existing one!</p>';
-                return;
-            }
-            classes.forEach(cls => {
-                const classCard = document.createElement('div');
-                classCard.className = 'bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer';
-                classCard.innerHTML = `
-                    <h3 class="text-xl font-semibold text-gray-800">${cls.title}</h3>
-                    <p class="text-sm text-gray-500">ID: <span class="font-mono text-gray-700">${cls.id}</span></p>
-                    <p class="mt-2 text-gray-600">Creator: ${cls.creatorName}</p>
-                `;
-                classCard.addEventListener('click', () => {
-                    activeClassId = cls.id;
-                    document.getElementById('current-class-title').textContent = cls.title;
-                    mainSection.classList.remove('hidden');
-                    switchTab('assignments');
-                    setupClassListeners(cls.id);
+            // Display classes in both locations
+            [classesListEl, document.getElementById('classes-list-main')].forEach(listEl => {
+                listEl.innerHTML = '';
+                if (classes.length === 0) {
+                    listEl.innerHTML = '<p class="text-gray-500">No classes found. Create one or join an existing one!</p>';
+                    return;
+                }
+                classes.forEach(cls => {
+                    const classCard = document.createElement('div');
+                    classCard.className = 'bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-all cursor-pointer';
+                    classCard.innerHTML = `
+                        <h3 class="text-xl font-semibold text-gray-800">${cls.title}</h3>
+                        <p class="text-sm text-gray-500">ID: <span class="font-mono text-gray-700">${cls.id}</span></p>
+                        <p class="mt-2 text-gray-600">Creator: ${cls.creatorName}</p>
+                    `;
+                    classCard.addEventListener('click', () => {
+                        activeClassId = cls.id;
+                        document.getElementById('current-class-title').textContent = cls.title;
+                        loginSection.classList.add('hidden');
+                        mainSection.classList.remove('hidden');
+                        switchTab('assignments');
+                        setupClassListeners(cls.id);
+                    });
+                    listEl.appendChild(classCard);
                 });
-                classesListEl.appendChild(classCard);
             });
         }
 
@@ -222,12 +226,13 @@
 
         window.onload = function() {
             onAuthStateChanged(auth, async (user) => {
+                // Now that the auth state is ready, hide the loading screen and show the main UI.
+                loadingScreen.classList.add('hidden');
+                mainContent.classList.remove('hidden');
+
                 if (user) {
                     userId = user.uid;
                     userStatusEl.textContent = `Authenticated as: ${userId}`;
-                    loginSection.classList.add('hidden');
-                    mainSection.classList.remove('hidden');
-                    loadingScreen.classList.add('hidden');
                     setupClassesListener();
                 } else {
                     await authenticateUser();
@@ -275,6 +280,7 @@
                 if (classDoc.exists()) {
                     activeClassId = classIdToJoin;
                     document.getElementById('current-class-title').textContent = classDoc.data().title;
+                    loginSection.classList.add('hidden');
                     mainSection.classList.remove('hidden');
                     switchTab('assignments');
                     setupClassListeners(classIdToJoin);
@@ -354,6 +360,7 @@
     </div>
 
     <!-- Main Container -->
+    <!-- The 'hidden' class has been removed here to prevent the blank screen issue. -->
     <div id="main-content" class="w-full max-w-4xl bg-white rounded-xl shadow-2xl overflow-hidden p-6 mx-4 sm:mx-8 md:mx-auto hidden">
 
         <!-- Header -->
