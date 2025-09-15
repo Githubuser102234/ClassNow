@@ -68,13 +68,20 @@
         const cancelDeleteClassBtn = document.getElementById('cancel-delete-class-btn');
         const settingsTabBtn = document.getElementById('settings-btn');
         const assignmentsTabBtn = document.getElementById('assignments-btn');
-        const chatTabBtn = document.getElementById('chat-btn');
         const peopleTabBtn = document.getElementById('people-btn');
+        const chatTabBtn = document.getElementById('chat-btn');
+        const assignmentStatusTabBtn = document.getElementById('assignment-status-btn');
+        const assignmentStatusSection = document.getElementById('assignment-status-section');
+        const removeStudentModal = document.getElementById('remove-student-modal');
+        const confirmRemoveStudentBtn = document.getElementById('confirm-remove-student-btn');
+        const cancelRemoveStudentBtn = document.getElementById('cancel-remove-student-btn');
+        let currentStudentToRemove = null;
 
         // State variables
         let userId = null;
         let activeClassId = null;
         let isUserBanned = false;
+        let isClassOwner = false;
 
         /**
          * Displays a temporary message box with a given message.
@@ -92,13 +99,17 @@
 
         /**
          * Switches the active tab/section.
-         * @param {string} tabName The name of the tab to switch to ('classes', 'assignments', 'chat').
+         * @param {string} tabName The name of the tab to switch to ('assignments', 'people', 'chat', 'settings', 'assignment-status').
          */
         function switchTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.getElementById(`${tabName}-section`).classList.remove('hidden');
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active', 'bg-gray-200'));
             document.getElementById(`${tabName}-btn`).classList.add('active', 'bg-gray-200');
+            
+            if (tabName === 'assignment-status') {
+                displayAssignmentStatus();
+            }
         }
 
         /**
@@ -150,7 +161,8 @@
                     dashboardSection.classList.add('hidden');
                     mainSection.classList.remove('hidden');
                     switchTab('assignments');
-                    setupClassListeners(cls.id, cls.creatorId === userId);
+                    isClassOwner = cls.creatorId === userId;
+                    setupClassListeners(cls.id);
                 });
                 classesListEl.appendChild(classCard);
             });
@@ -159,9 +171,8 @@
         /**
          * Displays the assignments for the active class.
          * @param {Array<Object>} assignments The array of assignment data.
-         * @param {boolean} isOwner True if the current user is the class owner.
          */
-        function displayAssignments(assignments, isOwner) {
+        function displayAssignments(assignments) {
             assignmentsListEl.innerHTML = '';
             if (assignments.length === 0) {
                 assignmentsListEl.innerHTML = '<p class="text-gray-500">No assignments posted yet.</p>';
@@ -178,7 +189,7 @@
                     </div>
                 `;
                 
-                if (isOwner) {
+                if (isClassOwner) {
                     const deleteBtn = document.createElement('button');
                     deleteBtn.className = 'delete-btn px-4 py-2 bg-red-500 text-white text-sm rounded-lg shadow-md hover:bg-red-600 transition-colors';
                     deleteBtn.textContent = 'Delete';
@@ -194,8 +205,18 @@
                     assignmentCard.querySelector('div').appendChild(deleteBtn);
                 }
 
-                assignmentCard.querySelector('.submit-btn').addEventListener('click', () => {
-                    showMessage('Assignment marked as done!');
+                assignmentCard.querySelector('.submit-btn').addEventListener('click', async () => {
+                    const submissionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments', assignment.id, 'submissions');
+                    try {
+                        await setDoc(doc(submissionsRef, userId), {
+                            userId: userId,
+                            timestamp: Date.now()
+                        });
+                        showMessage('Assignment marked as done!');
+                    } catch (error) {
+                        console.error("Error submitting assignment:", error);
+                        showMessage("Failed to mark assignment as done.", true);
+                    }
                 });
                 assignmentsListEl.appendChild(assignmentCard);
             });
@@ -231,56 +252,133 @@
                 memberCard.className = `flex items-center space-x-4 bg-white p-4 rounded-lg shadow-md ${isBanned ? 'bg-gray-200 opacity-50' : ''}`;
                 memberCard.innerHTML = `
                     <img src="${member.photoURL}" alt="${member.displayName}" class="w-10 h-10 rounded-full">
-                    <div>
+                    <div class="flex-1">
                         <p class="font-semibold text-gray-800">${member.displayName}</p>
                         <p class="text-sm text-gray-500">${isTeacher ? 'Teacher' : 'Student'}${isBanned ? ' (Banned)' : ''}</p>
                     </div>
                 `;
+
+                if (isClassOwner && !isTeacher && !isBanned) {
+                    const removeBtn = document.createElement('button');
+                    removeBtn.className = 'px-4 py-2 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors';
+                    removeBtn.textContent = 'Remove';
+                    removeBtn.addEventListener('click', () => {
+                        currentStudentToRemove = member.userId;
+                        removeStudentModal.classList.remove('hidden');
+                    });
+                    memberCard.appendChild(removeBtn);
+                }
                 peopleListEl.appendChild(memberCard);
             });
         }
 
+        async function removeStudent() {
+            if (!currentStudentToRemove || !activeClassId) return;
+
+            const memberRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'members', currentStudentToRemove);
+            try {
+                await deleteDoc(memberRef);
+                showMessage('Student removed successfully.');
+            } catch (error) {
+                console.error("Error removing student:", error);
+                showMessage("Failed to remove student.", true);
+            } finally {
+                currentStudentToRemove = null;
+                removeStudentModal.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Displays the student assignment status table.
+         */
+        async function displayAssignmentStatus() {
+            if (!isClassOwner) return;
+
+            const assignmentStatusTable = document.getElementById('assignment-status-table');
+            assignmentStatusTable.innerHTML = ''; // Clear previous data
+            const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments');
+            const membersRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'members');
+
+            try {
+                const [assignmentsSnapshot, membersSnapshot] = await Promise.all([
+                    getDocs(assignmentsRef),
+                    getDocs(membersRef)
+                ]);
+
+                const assignments = assignmentsSnapshot.docs.map(doc => ({ id: doc.id, title: doc.data().title }));
+                const members = await Promise.all(membersSnapshot.docs.map(async (memberDoc) => {
+                    const memberData = memberDoc.data();
+                    const userRef = doc(db, 'artifacts', appId, 'users', memberData.userId);
+                    const userDoc = await getDoc(userRef);
+                    return { ...memberData, isBanned: userDoc.exists() ? userDoc.data().isBanned || false : false };
+                }));
+
+                const headerRow = document.createElement('tr');
+                headerRow.className = 'bg-gray-200';
+                headerRow.innerHTML = `<th class="px-4 py-2 text-left">Student</th>`;
+                assignments.forEach(assignment => {
+                    headerRow.innerHTML += `<th class="px-4 py-2 text-center">${assignment.title}</th>`;
+                });
+                assignmentStatusTable.appendChild(headerRow);
+
+                for (const member of members) {
+                    if (member.isBanned) continue;
+                    const row = document.createElement('tr');
+                    row.className = 'border-b border-gray-200';
+                    row.innerHTML = `<td class="px-4 py-2">${member.displayName}</td>`;
+
+                    for (const assignment of assignments) {
+                        const submissionRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments', assignment.id, 'submissions', member.userId);
+                        const submissionDoc = await getDoc(submissionRef);
+                        const status = submissionDoc.exists() ? '✅' : '❌';
+                        row.innerHTML += `<td class="px-4 py-2 text-center">${status}</td>`;
+                    }
+                    assignmentStatusTable.appendChild(row);
+                }
+
+            } catch (error) {
+                console.error("Error fetching assignment status:", error);
+                assignmentStatusTable.innerHTML = '<tr><td colspan="100%" class="px-4 py-4 text-center text-gray-500">Failed to load assignment status.</td></tr>';
+                showMessage("Failed to load assignment status.", true);
+            }
+        }
+
+
         /**
          * Sets up real-time listeners for the active class's assignments, chat, and members.
          * @param {string} classId The ID of the class to listen to.
-         * @param {boolean} isOwner True if the current user is the class owner.
          */
-        async function setupClassListeners(classId, isOwner) {
-            // Check if the class owner is banned
-            let isOwnerBanned = false;
-            let creatorId = null;
-
+        async function setupClassListeners(classId) {
             const classDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId));
-            if (classDoc.exists()) {
-                creatorId = classDoc.data().creatorId;
-                const ownerDoc = await getDoc(doc(db, 'artifacts', appId, 'users', creatorId));
-                isOwnerBanned = ownerDoc.exists() ? ownerDoc.data().isBanned : false;
-            }
+            const creatorId = classDoc.exists() ? classDoc.data().creatorId : null;
+            const isOwner = creatorId === userId;
+            const isOwnerBanned = classDoc.exists() ? (await getDoc(doc(db, 'artifacts', appId, 'users', creatorId))).data()?.isBanned : false;
+
+            isClassOwner = isOwner;
 
             // Show/hide owner-specific features
             if (isOwner && !isUserBanned) {
                 createAssignmentForm.classList.remove('hidden');
                 settingsTabBtn.classList.remove('hidden');
+                assignmentStatusTabBtn.classList.remove('hidden');
             } else {
                 createAssignmentForm.classList.add('hidden');
                 settingsTabBtn.classList.add('hidden');
+                assignmentStatusTabBtn.classList.add('hidden');
             }
 
             if (isOwnerBanned) {
                 // If the owner is banned, show service unavailable message
                 assignmentsListEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
                 chatMessagesEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
-                // Hide chat form and create assignment form
                 chatForm.classList.add('hidden');
-                createAssignmentForm.classList.add('hidden');
             } else {
-                // Restore chat form visibility
                 chatForm.classList.remove('hidden');
                 // Listen to assignments
                 const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments');
                 onSnapshot(assignmentsRef, (snapshot) => {
                     const assignments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    displayAssignments(assignments, isOwner);
+                    displayAssignments(assignments);
                 }, (error) => {
                     console.error("Error listening to assignments:", error);
                     showMessage("Error loading assignments.", true);
@@ -306,7 +404,6 @@
                     const userDoc = await getDoc(userRef);
                     return { ...memberData, isBanned: userDoc.exists() ? userDoc.data().isBanned || false : false };
                 }));
-                // Pass the correct creatorId to displayPeople
                 displayPeople(members, creatorId);
             }, (error) => {
                 console.error("Error listening to members:", error);
@@ -438,7 +535,8 @@
                                 dashboardSection.classList.add('hidden');
                                 mainSection.classList.remove('hidden');
                                 switchTab('assignments');
-                                setupClassListeners(classIdToJoin, classDoc.data().creatorId === userId);
+                                isClassOwner = classDoc.data().creatorId === userId;
+                                setupClassListeners(classIdToJoin);
                                 showMessage('Successfully joined class!');
                                 document.getElementById('class-id-input').value = '';
                             } else {
@@ -471,6 +569,7 @@
         chatTabBtn.addEventListener('click', () => switchTab('chat'));
         peopleTabBtn.addEventListener('click', () => switchTab('people'));
         settingsTabBtn.addEventListener('click', () => switchTab('settings'));
+        assignmentStatusTabBtn.addEventListener('click', () => switchTab('assignment-status'));
 
 
         // Sign in and out buttons
@@ -577,6 +676,13 @@
                 showMessage("Failed to delete class.", true);
             }
         });
+
+        // Remove student logic
+        confirmRemoveStudentBtn.addEventListener('click', removeStudent);
+        cancelRemoveStudentBtn.addEventListener('click', () => {
+            currentStudentToRemove = null;
+            removeStudentModal.classList.add('hidden');
+        });
     </script>
 </head>
 
@@ -659,6 +765,7 @@
                 <button id="assignments-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Assignments</button>
                 <button id="people-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">People</button>
                 <button id="chat-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200">Chat</button>
+                <button id="assignment-status-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200 hidden">Assignment Status</button>
                 <button id="settings-btn" class="tab-btn flex-1 px-4 py-2 rounded-md font-medium text-gray-700 transition-colors hover:bg-gray-200 hidden">Settings</button>
             </div>
 
@@ -699,6 +806,22 @@
                 </form>
             </div>
 
+            <!-- Assignment Status Tab Content (owner only) -->
+            <div id="assignment-status-section" class="tab-content hidden space-y-6">
+                <h3 class="text-xl font-semibold text-gray-700">Student Assignment Status</h3>
+                <div class="bg-white p-6 rounded-lg shadow-md overflow-x-auto">
+                    <table class="w-full text-sm text-left text-gray-500">
+                        <thead class="text-xs text-gray-700 uppercase bg-gray-50">
+                            <tr id="assignment-status-table-head">
+                            </tr>
+                        </thead>
+                        <tbody id="assignment-status-table-body">
+                            <!-- Status will be populated here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Settings Tab Content (owner only) -->
             <div id="settings-section" class="tab-content hidden space-y-6">
                 <h3 class="text-xl font-semibold text-gray-700">Class Settings</h3>
@@ -719,6 +842,18 @@
                 <div class="flex justify-center space-x-4">
                     <button id="cancel-delete-class-btn" class="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Cancel</button>
                     <button id="confirm-delete-class-btn" class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">Delete</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Remove Student Confirmation Modal -->
+        <div id="remove-student-modal" class="fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center hidden">
+            <div class="bg-white p-8 rounded-lg shadow-xl text-center">
+                <p class="text-lg font-semibold mb-4">Are you sure you want to remove this student?</p>
+                <p class="text-sm text-gray-600 mb-6">They will be removed from this class permanently.</p>
+                <div class="flex justify-center space-x-4">
+                    <button id="cancel-remove-student-btn" class="px-6 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100 transition-colors">Cancel</button>
+                    <button id="confirm-remove-student-btn" class="px-6 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors">Remove</button>
                 </div>
             </div>
         </div>
