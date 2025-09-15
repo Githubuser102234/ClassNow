@@ -59,6 +59,7 @@
         const classesListEl = document.getElementById('classes-list');
         const assignmentsListEl = document.getElementById('assignments-list');
         const chatMessagesEl = document.getElementById('chat-messages');
+        const chatForm = document.getElementById('chat-form');
         const peopleListEl = document.getElementById('people-list');
         const createAssignmentForm = document.getElementById('create-assignment-form-section');
         const deleteClassBtn = document.getElementById('delete-class-btn');
@@ -247,13 +248,13 @@
         async function setupClassListeners(classId, isOwner) {
             // Check if the class owner is banned
             let isOwnerBanned = false;
-            if (!isOwner) {
-                const classDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId));
-                if (classDoc.exists()) {
-                    const ownerId = classDoc.data().creatorId;
-                    const ownerDoc = await getDoc(doc(db, 'artifacts', appId, 'users', ownerId));
-                    isOwnerBanned = ownerDoc.exists() ? ownerDoc.data().isBanned : false;
-                }
+            let creatorId = null;
+
+            const classDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId));
+            if (classDoc.exists()) {
+                creatorId = classDoc.data().creatorId;
+                const ownerDoc = await getDoc(doc(db, 'artifacts', appId, 'users', creatorId));
+                isOwnerBanned = ownerDoc.exists() ? ownerDoc.data().isBanned : false;
             }
 
             // Show/hide owner-specific features
@@ -269,7 +270,12 @@
                 // If the owner is banned, show service unavailable message
                 assignmentsListEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
                 chatMessagesEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
+                // Hide chat form and create assignment form
+                chatForm.classList.add('hidden');
+                createAssignmentForm.classList.add('hidden');
             } else {
+                // Restore chat form visibility
+                chatForm.classList.remove('hidden');
                 // Listen to assignments
                 const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments');
                 onSnapshot(assignmentsRef, (snapshot) => {
@@ -300,7 +306,8 @@
                     const userDoc = await getDoc(userRef);
                     return { ...memberData, isBanned: userDoc.exists() ? userDoc.data().isBanned || false : false };
                 }));
-                displayPeople(members, isOwner ? userId : null);
+                // Pass the correct creatorId to displayPeople
+                displayPeople(members, creatorId);
             }, (error) => {
                 console.error("Error listening to members:", error);
                 showMessage("Error loading class members.", true);
@@ -440,6 +447,7 @@
                         } catch (error) {
                             console.error("Error joining class:", error);
                             showMessage("Failed to join class.", true);
+                            console.log('Error details:', error);
                         }
                     });
 
