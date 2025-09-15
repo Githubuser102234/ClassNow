@@ -75,6 +75,8 @@
         const removeStudentModal = document.getElementById('remove-student-modal');
         const confirmRemoveStudentBtn = document.getElementById('confirm-remove-student-btn');
         const cancelRemoveStudentBtn = document.getElementById('cancel-remove-student-btn');
+        const disableChatToggle = document.getElementById('disable-chat-toggle');
+        const lockChatToggle = document.getElementById('lock-chat-toggle');
         let currentStudentToRemove = null;
 
         // State variables
@@ -82,6 +84,8 @@
         let activeClassId = null;
         let isUserBanned = false;
         let isClassOwner = false;
+        let chatDisabled = false;
+        let chatLocked = false;
 
         /**
          * Displays a temporary message box with a given message.
@@ -106,7 +110,7 @@
             document.getElementById(`${tabName}-section`).classList.remove('hidden');
             document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active', 'bg-gray-200'));
             document.getElementById(`${tabName}-btn`).classList.add('active', 'bg-gray-200');
-            
+
             if (tabName === 'assignment-status') {
                 displayAssignmentStatus();
             }
@@ -171,13 +175,15 @@
         /**
          * Displays the assignments for the active class.
          * @param {Array<Object>} assignments The array of assignment data.
+         * @param {Array<Object>} submissions The array of user's submissions.
          */
-        function displayAssignments(assignments) {
+        function displayAssignments(assignments, submissions) {
             assignmentsListEl.innerHTML = '';
             if (assignments.length === 0) {
                 assignmentsListEl.innerHTML = '<p class="text-gray-500">No assignments posted yet.</p>';
             }
             assignments.forEach(assignment => {
+                const isSubmitted = submissions.some(sub => sub.id === assignment.id);
                 const assignmentCard = document.createElement('div');
                 assignmentCard.className = 'bg-white p-6 rounded-lg shadow-md mb-4';
                 assignmentCard.innerHTML = `
@@ -185,10 +191,12 @@
                     <p class="text-gray-600 my-2">${assignment.description}</p>
                     <p class="text-sm text-gray-500">Due: ${new Date(assignment.dueDate).toLocaleDateString()}</p>
                     <div class="mt-4 flex space-x-2">
-                        <button class="submit-btn px-4 py-2 bg-blue-500 text-white text-sm rounded-lg shadow-md hover:bg-blue-600 transition-colors">Mark as Done</button>
+                        <button class="submit-btn px-4 py-2 text-white text-sm rounded-lg shadow-md transition-colors ${isSubmitted ? 'bg-orange-500 hover:bg-orange-600' : 'bg-blue-500 hover:bg-blue-600'}">
+                            ${isSubmitted ? 'Unmark as Done' : 'Mark as Done'}
+                        </button>
                     </div>
                 `;
-                
+
                 if (isClassOwner) {
                     const deleteBtn = document.createElement('button');
                     deleteBtn.className = 'delete-btn px-4 py-2 bg-red-500 text-white text-sm rounded-lg shadow-md hover:bg-red-600 transition-colors';
@@ -206,16 +214,21 @@
                 }
 
                 assignmentCard.querySelector('.submit-btn').addEventListener('click', async () => {
-                    const submissionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments', assignment.id, 'submissions');
+                    const submissionsRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments', assignment.id, 'submissions', userId);
                     try {
-                        await setDoc(doc(submissionsRef, userId), {
-                            userId: userId,
-                            timestamp: Date.now()
-                        });
-                        showMessage('Assignment marked as done!');
+                        if (isSubmitted) {
+                            await deleteDoc(submissionsRef);
+                            showMessage('Assignment unmarked!');
+                        } else {
+                            await setDoc(submissionsRef, {
+                                userId: userId,
+                                timestamp: Date.now()
+                            });
+                            showMessage('Assignment marked as done!');
+                        }
                     } catch (error) {
-                        console.error("Error submitting assignment:", error);
-                        showMessage("Failed to mark assignment as done.", true);
+                        console.error("Error updating assignment status:", error);
+                        showMessage("Failed to update assignment status.", true);
                     }
                 });
                 assignmentsListEl.appendChild(assignmentCard);
@@ -294,8 +307,12 @@
         async function displayAssignmentStatus() {
             if (!isClassOwner) return;
 
-            const assignmentStatusTable = document.getElementById('assignment-status-table');
-            assignmentStatusTable.innerHTML = ''; // Clear previous data
+            const assignmentStatusTableBody = document.getElementById('assignment-status-table-body');
+            const assignmentStatusTableHead = document.getElementById('assignment-status-table-head');
+
+            assignmentStatusTableBody.innerHTML = '';
+            assignmentStatusTableHead.innerHTML = `<th class="px-4 py-2 text-left">Student</th>`;
+
             const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'assignments');
             const membersRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'members');
 
@@ -313,13 +330,13 @@
                     return { ...memberData, isBanned: userDoc.exists() ? userDoc.data().isBanned || false : false };
                 }));
 
-                const headerRow = document.createElement('tr');
-                headerRow.className = 'bg-gray-200';
-                headerRow.innerHTML = `<th class="px-4 py-2 text-left">Student</th>`;
                 assignments.forEach(assignment => {
-                    headerRow.innerHTML += `<th class="px-4 py-2 text-center">${assignment.title}</th>`;
+                    const th = document.createElement('th');
+                    th.className = 'px-4 py-2 text-center';
+                    th.textContent = assignment.title;
+                    assignmentStatusTableHead.appendChild(th);
                 });
-                assignmentStatusTable.appendChild(headerRow);
+
 
                 for (const member of members) {
                     if (member.isBanned) continue;
@@ -333,12 +350,12 @@
                         const status = submissionDoc.exists() ? '✅' : '❌';
                         row.innerHTML += `<td class="px-4 py-2 text-center">${status}</td>`;
                     }
-                    assignmentStatusTable.appendChild(row);
+                    assignmentStatusTableBody.appendChild(row);
                 }
 
             } catch (error) {
                 console.error("Error fetching assignment status:", error);
-                assignmentStatusTable.innerHTML = '<tr><td colspan="100%" class="px-4 py-4 text-center text-gray-500">Failed to load assignment status.</td></tr>';
+                assignmentStatusTableBody.innerHTML = '<tr><td colspan="100%" class="px-4 py-4 text-center text-gray-500">Failed to load assignment status.</td></tr>';
                 showMessage("Failed to load assignment status.", true);
             }
         }
@@ -350,50 +367,68 @@
          */
         async function setupClassListeners(classId) {
             const classDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId));
-            const creatorId = classDoc.exists() ? classDoc.data().creatorId : null;
+            const classData = classDoc.exists() ? classDoc.data() : null;
+            const creatorId = classData ? classData.creatorId : null;
             const isOwner = creatorId === userId;
-            const isOwnerBanned = classDoc.exists() ? (await getDoc(doc(db, 'artifacts', appId, 'users', creatorId))).data()?.isBanned : false;
-
             isClassOwner = isOwner;
 
-            // Show/hide owner-specific features
-            if (isOwner && !isUserBanned) {
-                createAssignmentForm.classList.remove('hidden');
-                settingsTabBtn.classList.remove('hidden');
-                assignmentStatusTabBtn.classList.remove('hidden');
+            // Handle chat settings and visibility
+            if (isOwner) {
+                disableChatToggle.checked = classData?.chatDisabled || false;
+                lockChatToggle.checked = classData?.chatLocked || false;
+                disableChatToggle.disabled = false;
+                lockChatToggle.disabled = false;
             } else {
-                createAssignmentForm.classList.add('hidden');
-                settingsTabBtn.classList.add('hidden');
-                assignmentStatusTabBtn.classList.add('hidden');
+                disableChatToggle.disabled = true;
+                lockChatToggle.disabled = true;
             }
 
-            if (isOwnerBanned) {
-                // If the owner is banned, show service unavailable message
-                assignmentsListEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
-                chatMessagesEl.innerHTML = '<div class="text-center text-gray-500 py-10">Service Unavailable. Please try again later.</div>';
-                chatForm.classList.add('hidden');
-            } else {
-                chatForm.classList.remove('hidden');
-                // Listen to assignments
-                const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments');
-                onSnapshot(assignmentsRef, (snapshot) => {
-                    const assignments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    displayAssignments(assignments);
-                }, (error) => {
-                    console.error("Error listening to assignments:", error);
-                    showMessage("Error loading assignments.", true);
-                });
+            // Set chat state from class data
+            chatDisabled = classData?.chatDisabled || false;
+            chatLocked = classData?.chatLocked || false;
 
-                // Listen to chat messages
-                const chatRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'chat');
-                onSnapshot(chatRef, (snapshot) => {
-                    const messages = snapshot.docs.map(doc => doc.data()).sort((a, b) => a.timestamp - b.timestamp);
-                    displayChat(messages);
-                }, (error) => {
-                    console.error("Error listening to chat:", error);
-                    showMessage("Error loading chat.", true);
-                });
-            }
+            updateChatUI();
+            updateTeacherUI();
+
+            // Listen to assignments and submissions
+            const assignmentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments');
+            const submissionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments', 'temp', 'submissions');
+            
+            onSnapshot(assignmentsRef, async (assignmentsSnapshot) => {
+                const assignments = assignmentsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                // Get submissions for the current user
+                const userSubmissions = (await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments'), where('submissions.' + userId, '==', true)))).docs.map(doc => ({id: doc.id}));
+                
+                const submissions = await Promise.all(assignments.map(async (assignment) => {
+                    const submissionDoc = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'assignments', assignment.id, 'submissions', userId));
+                    return { id: assignment.id, exists: submissionDoc.exists() };
+                }));
+
+                displayAssignments(assignments, submissions.filter(sub => sub.exists));
+            }, (error) => {
+                console.error("Error listening to assignments:", error);
+                showMessage("Error loading assignments.", true);
+            });
+            
+            // Listen to class data for chat settings
+            onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'classes', classId), (docSnapshot) => {
+                const data = docSnapshot.data();
+                if (data) {
+                    chatDisabled = data.chatDisabled || false;
+                    chatLocked = data.chatLocked || false;
+                    updateChatUI();
+                }
+            });
+
+            // Listen to chat messages
+            const chatRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'chat');
+            onSnapshot(chatRef, (snapshot) => {
+                const messages = snapshot.docs.map(doc => doc.data()).sort((a, b) => a.timestamp - b.timestamp);
+                displayChat(messages);
+            }, (error) => {
+                console.error("Error listening to chat:", error);
+                showMessage("Error loading chat.", true);
+            });
 
             // Listen to class members and check their banned status
             const membersRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', classId, 'members');
@@ -409,6 +444,32 @@
                 console.error("Error listening to members:", error);
                 showMessage("Error loading class members.", true);
             });
+        }
+
+        function updateChatUI() {
+            if (chatDisabled) {
+                chatTabBtn.classList.add('hidden');
+                document.getElementById('chat-section').classList.add('hidden');
+            } else {
+                chatTabBtn.classList.remove('hidden');
+            }
+            if (chatLocked && !isClassOwner) {
+                document.getElementById('chat-form').classList.add('hidden');
+            } else {
+                document.getElementById('chat-form').classList.remove('hidden');
+            }
+        }
+
+        function updateTeacherUI() {
+            if (isClassOwner && !isUserBanned) {
+                createAssignmentForm.classList.remove('hidden');
+                settingsTabBtn.classList.remove('hidden');
+                assignmentStatusTabBtn.classList.remove('hidden');
+            } else {
+                createAssignmentForm.classList.add('hidden');
+                settingsTabBtn.classList.add('hidden');
+                assignmentStatusTabBtn.classList.add('hidden');
+            }
         }
 
         /**
@@ -494,7 +555,9 @@
                                 title: classTitle,
                                 creatorId: userId,
                                 creatorName: auth.currentUser.displayName,
-                                createdAt: Date.now()
+                                createdAt: Date.Sow(),
+                                chatDisabled: false,
+                                chatLocked: false,
                             });
 
                             const membersRef = collection(newClassRef, 'members');
@@ -612,7 +675,7 @@
             const messageInput = document.getElementById('message-input');
             const messageText = messageInput.value.trim();
 
-            if (!messageText || !activeClassId) return;
+            if (!messageText || !activeClassId || (chatLocked && !isClassOwner)) return;
 
             const chatRef = collection(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId, 'chat');
             try {
@@ -682,6 +745,31 @@
         cancelRemoveStudentBtn.addEventListener('click', () => {
             currentStudentToRemove = null;
             removeStudentModal.classList.add('hidden');
+        });
+
+        // Chat settings logic
+        disableChatToggle.addEventListener('change', async (e) => {
+            if (!activeClassId) return;
+            const classRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId);
+            try {
+                await updateDoc(classRef, { chatDisabled: e.target.checked });
+                showMessage(`Chat has been ${e.target.checked ? 'disabled' : 'enabled'}.`);
+            } catch (error) {
+                console.error("Error updating chat settings:", error);
+                showMessage("Failed to update chat settings.", true);
+            }
+        });
+
+        lockChatToggle.addEventListener('change', async (e) => {
+            if (!activeClassId) return;
+            const classRef = doc(db, 'artifacts', appId, 'public', 'data', 'classes', activeClassId);
+            try {
+                await updateDoc(classRef, { chatLocked: e.target.checked });
+                showMessage(`Chat has been ${e.target.checked ? 'locked' : 'unlocked'}.`);
+            } catch (error) {
+                console.error("Error updating chat settings:", error);
+                showMessage("Failed to update chat settings.", true);
+            }
         });
     </script>
 </head>
@@ -825,6 +913,17 @@
             <!-- Settings Tab Content (owner only) -->
             <div id="settings-section" class="tab-content hidden space-y-6">
                 <h3 class="text-xl font-semibold text-gray-700">Class Settings</h3>
+                <div class="bg-gray-50 p-6 rounded-lg shadow-inner">
+                    <h4 class="text-lg font-medium text-gray-800 mb-3">Chat Management</h4>
+                    <div class="flex items-center justify-between mb-4">
+                        <label for="disable-chat-toggle" class="text-sm text-gray-600">Disable Chat</label>
+                        <input type="checkbox" id="disable-chat-toggle" class="toggle-switch">
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <label for="lock-chat-toggle" class="text-sm text-gray-600">Lock Chat (Teacher-only messages)</label>
+                        <input type="checkbox" id="lock-chat-toggle" class="toggle-switch">
+                    </div>
+                </div>
                 <div class="bg-gray-50 p-6 rounded-lg shadow-inner">
                     <h4 class="text-lg font-medium text-gray-800 mb-3">Danger Zone</h4>
                     <p class="text-sm text-gray-600 mb-4">Permanently delete this class and all associated data, including assignments and chat messages. This action cannot be undone.</p>
