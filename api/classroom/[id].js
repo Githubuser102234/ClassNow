@@ -218,6 +218,7 @@ const classroomHtmlTemplate = (classId) => `
         function showMessage(message, isError = false) {
             messageBox.textContent = message;
             messageBox.className = `p-3 my-4 text-sm rounded-lg ${isError ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'} transition-all duration-300 transform scale-100`;
+            
             setTimeout(() => {
                 messageBox.textContent = '';
                 messageBox.className = 'transition-all duration-300 transform scale-0 h-0';
