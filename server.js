@@ -13,7 +13,10 @@ app.use(express.static('public'));
 
 // 🚀 In-memory "database" to replace Firebase
 const db = {
-    users: {},
+    // Storing users with email and password
+    users: {
+        'testuser@example.com': { id: uid(16), email: 'testuser@example.com', password: 'password123', displayName: 'Test User', photoURL: 'https://via.placeholder.com/150', isBanned: false },
+    },
     classes: {},
     sessions: {},
 };
@@ -31,25 +34,36 @@ const authMiddleware = (req, res, next) => {
 // 🗺️ API Routes
 // --- User Authentication ---
 app.post('/api/login', (req, res) => {
-    // This is a placeholder for a real authentication flow (e.g., Google OAuth).
-    // In a real app, you would verify the user with Google.
-    const { displayName, photoURL } = req.body;
+    const { email, password } = req.body;
+    const user = Object.values(db.users).find(u => u.email === email);
     
-    // Check if user already exists in our "db"
-    let userId;
-    const existingUser = Object.values(db.users).find(user => user.displayName === displayName);
-    if (existingUser) {
-        userId = existingUser.id;
-    } else {
-        userId = uid(16);
-        db.users[userId] = { id: userId, displayName, photoURL, isBanned: false };
+    if (!user || user.password !== password) {
+        return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     const sessionId = uid(24);
-    db.sessions[sessionId] = { user: db.users[userId] };
+    db.sessions[sessionId] = { user: user };
     
     res.cookie('sessionId', sessionId, { httpOnly: true, sameSite: 'Strict' });
     res.status(200).json({ message: 'Login successful' });
+});
+
+app.post('/api/signup', (req, res) => {
+    const { displayName, email, password } = req.body;
+
+    if (Object.values(db.users).find(u => u.email === email)) {
+        return res.status(409).json({ error: 'Email already exists' });
+    }
+    
+    const userId = uid(16);
+    const newUser = { id: userId, displayName, email, password, photoURL: 'https://via.placeholder.com/150', isBanned: false };
+    db.users[userId] = newUser;
+
+    const sessionId = uid(24);
+    db.sessions[sessionId] = { user: newUser };
+    
+    res.cookie('sessionId', sessionId, { httpOnly: true, sameSite: 'Strict' });
+    res.status(201).json({ message: 'Sign up successful' });
 });
 
 app.post('/api/logout', (req, res) => {
@@ -149,8 +163,6 @@ app.post('/api/classroom/:id/assignments', authMiddleware, (req, res) => {
     res.status(201).json({ message: 'Assignment posted successfully' });
 });
 
-// Placeholder for other endpoints
-// --- Assignment Submissions ---
 app.post('/api/classroom/:id/assignments/:assignmentId/submit', authMiddleware, (req, res) => {
     const { id, assignmentId } = req.params;
     const user = req.user;
